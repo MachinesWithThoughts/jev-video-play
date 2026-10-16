@@ -284,6 +284,9 @@ field, and it is worth the most on its own — on a frame of the Thirteenth
 Doctor, "Look for a woman" lifts the presence gate from 0.57 to 0.83 while the
 bare name never clears the 0.60 default.
 
+Each description ends with who plays the part (`… (played by Patrick Stewart)`),
+so the cast editor and the questions show the actor as well as the look.
+
 A character whose actor changes between seasons is described per incarnation.
 The cast table carries a qualifier beside the name (`Thirteenth`, `Fugitive`),
 which picks the page, so series 12 describes Jodie Whittaker's Doctor and not
@@ -388,8 +391,12 @@ anything that isn't Star Trek.
 ## Events
 
 An expandable **Events** panel at the foot of the page tails what the backend
-is doing, over server-sent events: each step of a cast lookup as it happens,
-transcodes, snapshots, and failures including a detection that errors.
+is doing: each step of a cast lookup as it happens, transcodes, snapshots, and
+failures including a detection that errors. Live updates arrive over
+server-sent events, and the panel also polls `GET /api/events` on a short
+interval so a buffering proxy (a Cloudflare quick tunnel, say) that stalls the
+stream does not leave it empty — a **Refresh** button re-pulls everything on
+demand.
 
 It carries what you do, too — opening a file, the dimensions and duration it
 turned out to have, a file the browser could not decode, **Play anyway**.
@@ -464,7 +471,7 @@ box with whether it was drawn and, if not, why it was dropped.
 ## Version and build stamp
 
 A thin strip at the top of the page reads
-`v0.1.0 · built Oct 15, 2026, 4:29 PM · 17 seconds ago`, with the full
+`v1.4.1 · built Oct 15, 2026, 4:29 PM · 17 seconds ago`, with the full
 timestamp on hover and the relative part repainting every 30 seconds.
 
 There is no build step, so "built" is the newest mtime across `python/app.py` and
@@ -490,7 +497,8 @@ and printed on startup.
 
 The Boxes list is ordered by what is on screen: drawn boxes first, then by
 presence, with colour breaking ties so crimson still reads before green before
-yellow.
+yellow. It caps at five rows and scrolls past that, so a long frame of bands
+does not push the other cards off the screen.
 
 The list and the panel are linked in both directions:
 

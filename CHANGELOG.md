@@ -5,7 +5,7 @@ Notable changes, newest first. Dates are the day the work landed.
 The version in `VERSION` (`python/app.py`) and the build stamp in the page
 header identify a running copy; this file explains what changed between them.
 
-## [Unreleased]
+## [1.4.1] — 2026-10-16
 
 ### Changed
 - **Box list is a fixed five rows tall.** The Boxes list no longer grows with

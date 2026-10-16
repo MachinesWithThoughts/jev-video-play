@@ -51,7 +51,7 @@ import cast as cast_builder
 HERE = Path(__file__).resolve().parent
 STATIC = HERE / "static"
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 
 JEV_URL = "https://api.typesafe.ai/v1/systemone"
 
