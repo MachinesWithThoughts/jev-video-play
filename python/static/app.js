@@ -52,6 +52,8 @@ const state = {
   selectedFrom: null,
   videoName: "",
   serverSide: false,
+  url: null,
+  isYt: false,
   transcoding: false,
   inFlight: false,
   lastSentAt: 0,
@@ -109,12 +111,79 @@ function playFile(file) {
     type: file.type || "unknown",
   });
   state.serverSide = false;
+  state.url = null;
+  state.isYt = false;
   state.transcoding = false;
   if (objectUrl) URL.revokeObjectURL(objectUrl);
   objectUrl = URL.createObjectURL(file);
   loadSource(objectUrl, file.name);
   // The cast is per-show, so a new file needs a new one.
   syncCast(file.name);
+}
+
+// Opening a URL plays it through the backend so the frames the page captures
+// stay same-origin (a cross-origin video taints the canvas and detection would
+// fail on most hosts). The backend proxies the bytes and forwards Range.
+function isYtHost(hostname) {
+  return /(^|\.)(youtube\.com|youtu\.be)$/i.test(hostname);
+}
+
+// iOS Safari plays fragmented MP4 only through MSE, so the same sources are
+// served as HLS there; desktop keeps the fragmented-MP4 stream. iPadOS 13+
+// reports as MacIntel, hence the touch-point check.
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function playUrl(rawUrl) {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return;
+
+  // Assume http when no scheme was typed; a pasted https:// URL is left alone.
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    showError({ detail: "That is not a valid URL." });
+    return;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    showError({ detail: "Only http(s) URLs are supported." });
+    return;
+  }
+
+  const isYt = isYtHost(parsed.hostname);
+  logEvent(`Opened URL ${parsed.href}`, {});
+  state.serverSide = true;
+  state.url = parsed.href;
+  state.isYt = isYt;
+  state.transcoding = false;
+  if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+
+  if (isYt) {
+    // A watch URL has no filename to identify a show from, and the stream is
+    // already merged for the browser, so there is no cast lookup or transcode
+    // fallback — clear any stale cast and just play the resolved stream.
+    const name = parsed.searchParams.get("v")
+      || parsed.pathname.split("/").filter(Boolean).pop()
+      || parsed.hostname;
+    clearCast();
+    loadSource(
+      isIOS()
+        ? `/hls?yt=${encodeURIComponent(parsed.href)}`
+        : `/yt?url=${encodeURIComponent(parsed.href)}`,
+      name,
+    );
+    return;
+  }
+
+  const name = decodeURIComponent(
+    parsed.pathname.split("/").filter(Boolean).pop() || parsed.hostname,
+  );
+  loadSource(`/remote?url=${encodeURIComponent(parsed.href)}`, name);
+  syncCast(name);
 }
 
 // The cast decides which questions get asked, so playing before it lands would
@@ -201,6 +270,17 @@ async function syncCast(name) {
   }
 }
 
+// A watch URL has no filename to identify a show from, so there is no cast to
+// look up: forget whatever the previous video left behind.
+async function clearCast() {
+  state.cfg.cast = {};
+  state.cfg.cast_source = null;
+  showCast("none");
+  try {
+    await fetch("/api/cast/clear", { method: "POST" });
+  } catch {}
+}
+
 function loadSource(url, name) {
   if (name) state.videoName = name;
   $("empty-video").hidden = true;
@@ -225,6 +305,12 @@ function wireControls() {
     if (file) playFile(file);
   });
 
+  const openUrl = () => playUrl($("url").value);
+  $("open-url").addEventListener("click", openUrl);
+  $("url").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") openUrl();
+  });
+
   // The picker's filter hides containers macOS doesn't map to a video type,
   // so a drop is the way in for anything it greys out.
   const stage = $("stage-video");
@@ -245,16 +331,19 @@ function wireControls() {
 
   // A file the browser can't decode otherwise fails to a silent black panel.
   video.addEventListener("error", () => {
-    // If the file is one the backend can reach, hand it to ffmpeg instead of
+    // If the source is one the backend can reach, hand it to ffmpeg instead of
     // giving up: Matroska and AC-3 are common in rips and unplayable here.
-    if (state.serverSide && state.cfg.can_transcode && !state.transcoding) {
+    // A yt-dlp stream is already transcoded, so it skips this.
+    if (!state.isYt && state.serverSide && state.cfg.can_transcode && !state.transcoding) {
       logEvent("Browser cannot decode this file; falling back to ffmpeg", null, "warn");
       state.transcoding = true;
       $("empty-video").hidden = false;
       $("empty-video").innerHTML =
         "<b>Transcoding\u2026</b><span class='hint'>Your browser can't play this file, "
         + "so it is being converted as it streams. Seeking is unavailable.</span>";
-      video.src = "/stream";
+      video.src = isIOS()
+        ? (state.url ? `/hls?url=${encodeURIComponent(state.url)}` : "/hls")
+        : (state.url ? `/stream?url=${encodeURIComponent(state.url)}` : "/stream");
       video.load();
       video.play().catch(() => {});
       return;
@@ -308,18 +397,29 @@ function wireControls() {
   });
 
   let lastReady = "";
-  video.addEventListener("loadedmetadata", () => {
+  // HLS reports its real dimensions only after `loadedmetadata` (they read 0
+  // there on iOS), and an inline `aspect-ratio: 0 / 0` collapses the stage to a
+  // sliver. So the pane shape is applied only once both dimensions are known,
+  // on whichever event fires with them first.
+  function fitVideoStage() {
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) return;
+    $("stage-video").style.aspectRatio = `${vw} / ${vh}`;
+
     // Fires again on re-load of the same source; only say so once per file.
-    const signature = `${state.videoName}|${video.videoWidth}x${video.videoHeight}|${video.duration}`;
+    const signature = `${state.videoName}|${vw}x${vh}|${video.duration}`;
     if (signature !== lastReady) {
       lastReady = signature;
       logEvent(
-        `Playable: ${video.videoWidth}x${video.videoHeight}, ${fmtTime(video.duration)}`,
+        `Playable: ${vw}x${vh}, ${fmtTime(video.duration)}`,
         { video: state.videoName || null },
       );
     }
-    $("stage-video").style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
-  });
+  }
+  video.addEventListener("loadedmetadata", fitVideoStage);
+  video.addEventListener("loadeddata", fitVideoStage);
+  video.addEventListener("resize", fitVideoStage);
 
   $("gate-skip").addEventListener("click", skipGate);
 

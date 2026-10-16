@@ -29,6 +29,8 @@ import mimetypes
 import os
 import re
 import shutil
+import socket
+import tempfile
 import time
 import uuid
 import webbrowser
@@ -36,11 +38,12 @@ from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import cast as cast_builder
@@ -515,12 +518,19 @@ async def lifespan(app: FastAPI):
     global EVENT_LOOP
     EVENT_LOOP = asyncio.get_running_loop()
     app.state.http = httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0))
+    # Video proxying streams for as long as the player is watching, so there is
+    # no read timeout; only connecting is bounded.
+    app.state.stream_http = httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=10.0, read=None, write=None, pool=None),
+        follow_redirects=True,
+    )
     emit("server", f"Started {VERSION}, model {CONFIG['model']}",
          video=CONFIG["video_name"], cast=CAST_SOURCE)
     try:
         yield
     finally:
         await app.state.http.aclose()
+        await app.state.stream_http.aclose()
 
 
 app = FastAPI(title="Jev video play", lifespan=lifespan)
@@ -551,27 +561,168 @@ async def api_config() -> dict[str, Any]:
     }
 
 
+@app.get("/api/last")
+async def api_last() -> dict[str, Any]:
+    """The last URL or file the app was asked to play."""
+    return dict(LAST_SOURCE)
+
+
 def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
+def resolve_ip(host: str) -> str | None:
+    """The IP a host resolves to, preferring IPv4. None when it does not resolve."""
+    try:
+        infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return None
+    for info in infos:
+        ip = info[4][0]
+        if "." in ip:  # an IPv4 literal
+            return ip
+    return infos[0][4][0] if infos else None
+
+
+# The last source served, so it can be queried, and the last one logged to the
+# console (the second is deduped so Range-request seeking does not repeat it).
+LAST_SOURCE: dict[str, Any] = {}
+_LOGGED_SOURCE: str | None = None
+
+
+def log_source(kind: str, source: str, host: str | None = None, ip: str | None = None) -> None:
+    """Remember the last URL/file and write it to the console, not the page."""
+    global _LOGGED_SOURCE
+    is_url = source.startswith(("http://", "https://"))
+    LAST_SOURCE.update({
+        "kind": kind,
+        "url": source if is_url else None,
+        "file": None if is_url else source,
+        "host": host,
+        "ip": ip,
+    })
+    where = f" -> {host} ({ip or 'unresolved'})" if host else ""
+    message = f"{kind} {source}{where}"
+    if message == _LOGGED_SOURCE:
+        return
+    _LOGGED_SOURCE = message
+    print(f"source: {message}", flush=True)
+
+
+# iOS Safari only plays fragmented MP4 through Media Source Extensions, not a
+# plain <video>, so the same sources are served as HLS there. Each transcode
+# runs in its own temp directory; only one is active at a time, so a new stream
+# kills the previous one and frees its files and ffmpeg process.
+HLS_DIR = Path(tempfile.gettempdir()) / "jev-video-hls"
+HLS_ACTIVE: dict[str, asyncio.subprocess.Process] = {}
+
+
+async def resolve_yt_media(url: str) -> list[str]:
+    """Resolve a watch page to yt-dlp's chosen media URLs (signed, short-lived)."""
+    if not shutil.which("yt-dlp"):
+        raise HTTPException(status_code=503, detail="yt-dlp is not installed.")
+    resolve = await asyncio.create_subprocess_exec(
+        "yt-dlp", "-g", "-f", "bv*+ba/b", "--no-playlist", "--no-warnings", url,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out, err = await resolve.communicate()
+    if resolve.returncode != 0:
+        detail = err.decode(errors="replace").strip()[:300]
+        raise HTTPException(status_code=502, detail=f"yt-dlp could not resolve the video: {detail}")
+    media = [line for line in out.decode().splitlines() if line.strip()]
+    if not media:
+        raise HTTPException(status_code=502, detail="yt-dlp found no playable stream.")
+    return media
+
+
+def _prune_hls() -> None:
+    """Stop the previous HLS transcode and delete its files."""
+    for proc in list(HLS_ACTIVE.values()):
+        if proc.returncode is None:
+            proc.kill()
+    HLS_ACTIVE.clear()
+    if HLS_DIR.exists():
+        for entry in HLS_DIR.iterdir():
+            if entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
+
+
+async def spawn_hls(inputs: list[str]) -> str:
+    """Start an HLS transcode and return its stream id once the manifest exists."""
+    if not ffmpeg_available():
+        raise HTTPException(status_code=503, detail="ffmpeg is not installed.")
+
+    _prune_hls()
+    HLS_DIR.mkdir(parents=True, exist_ok=True)
+
+    stream_id = uuid.uuid4().hex[:12]
+    out_dir = HLS_DIR / stream_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest = out_dir / "index.m3u8"
+
+    process = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-loglevel", "error",
+        *(arg for src in inputs for arg in ("-i", src)),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-ac", "2",
+        "-f", "hls",
+        "-hls_time", "2",
+        "-hls_list_size", "0",
+        "-hls_playlist_type", "event",
+        str(manifest),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    HLS_ACTIVE[stream_id] = process
+
+    # Wait for the first segment so the browser's first playlist fetch succeeds.
+    for _ in range(120):  # ~30s worst case
+        if manifest.exists() and manifest.stat().st_size > 0:
+            break
+        if process.returncode is not None:
+            break
+        await asyncio.sleep(0.25)
+    if process.returncode is not None:
+        raise HTTPException(status_code=502, detail="ffmpeg failed to start the HLS stream.")
+    return stream_id
+
+
 @app.get("/stream")
-async def stream() -> StreamingResponse:
+async def stream(url: str | None = None) -> StreamingResponse:
     """Transcode the current file on the fly for browsers that cannot play it.
 
     Matroska, AC-3 and friends are common in rips and unplayable in a browser;
     ffmpeg re-wraps to fragmented MP4 as it goes. The output has no index, so
     the page cannot seek a stream, only play it.
+
+    `url` streams a remote source instead of the command-line file; ffmpeg
+    fetches it itself.
     """
-    path: Path | None = CONFIG["video_path"]
-    if path is None:
-        raise HTTPException(status_code=404, detail="No file to stream.")
+    source: str
+    label: str
+    if url:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise HTTPException(status_code=400, detail="Only http(s) URLs can be streamed.")
+        source = url
+        label = Path(parsed.path).name or url
+    else:
+        path: Path | None = CONFIG["video_path"]
+        if path is None:
+            raise HTTPException(status_code=404, detail="No file to stream.")
+        source = str(path)
+        label = path.name
+
     if not ffmpeg_available():
         raise HTTPException(status_code=503, detail="ffmpeg is not installed.")
 
-    emit("stream", f"Transcoding {path.name} with ffmpeg", level="warn")
+    emit("stream", f"Transcoding {label} with ffmpeg", level="warn")
+    log_source("transcode", source)
     process = await asyncio.create_subprocess_exec(
-        "ffmpeg", "-loglevel", "error", "-i", str(path),
+        "ffmpeg", "-loglevel", "error", "-i", source,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-ac", "2",
         "-movflags", "frag_keyframe+empty_moov+default_base_moof",
@@ -604,6 +755,7 @@ async def video(request: Request) -> Response:
     if path is None:
         raise HTTPException(status_code=404, detail="No video file was passed on the command line.")
 
+    log_source("file", str(path))
     size = path.stat().st_size
     media_type = mimetypes.guess_type(path.name)[0] or "video/mp4"
     start, end, status = 0, size - 1, 200
@@ -645,6 +797,165 @@ async def video(request: Request) -> Response:
                 yield chunk
 
     return StreamingResponse(chunks(), status_code=status, headers=headers, media_type=media_type)
+
+
+@app.get("/remote")
+async def remote(request: Request, url: str) -> Response:
+    """Serve a remote video same-origin so the page can read its frames.
+
+    Playing a video from another origin taints the canvas the page draws
+    frames from unless that origin sends CORS headers, which most video hosts
+    do not. Proxying the bytes here keeps them same-origin so detection works,
+    and Range requests are forwarded so the page can still seek.
+
+    This is an open proxy: anyone who can reach the app can make it fetch any
+    http(s) URL. The app already trusts its callers with the Jev key, so that
+    is no new exposure for the intended single-user use.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Only http(s) URLs can be proxied.")
+
+    client: httpx.AsyncClient = request.app.state.stream_http
+    upstream_headers: dict[str, str] = {}
+    if request.headers.get("range"):
+        upstream_headers["range"] = request.headers["range"]
+
+    try:
+        upstream = await client.send(
+            client.build_request("GET", url, headers=upstream_headers),
+            stream=True,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not fetch {url}: {exc}")
+
+    ip = await asyncio.to_thread(resolve_ip, parsed.hostname)
+    log_source("url", url, parsed.hostname, ip)
+
+    async def body():
+        try:
+            async for chunk in upstream.aiter_bytes():
+                yield chunk
+        finally:
+            await upstream.aclose()
+
+    media_type = upstream.headers.get("content-type") or "application/octet-stream"
+    headers = {"cache-control": "no-store"}
+    if upstream.headers.get("content-range"):
+        headers["content-range"] = upstream.headers["content-range"]
+    if upstream.headers.get("content-length"):
+        headers["content-length"] = upstream.headers["content-length"]
+    if upstream.headers.get("accept-ranges"):
+        headers["accept-ranges"] = upstream.headers["accept-ranges"]
+
+    return StreamingResponse(
+        body(), status_code=upstream.status_code, media_type=media_type, headers=headers,
+    )
+
+
+@app.get("/yt")
+async def yt(url: str) -> StreamingResponse:
+    """Stream a watch page (YouTube and friends) that yt-dlp can resolve.
+
+    Watch pages are HTML, not media, so `/remote` cannot serve them. yt-dlp
+    finds the real stream(s) and ffmpeg merges them to fragmented MP4, exactly
+    like `/stream`. The output has no index, so the page cannot seek it, only
+    play it.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Only http(s) URLs can be streamed.")
+
+    if not shutil.which("yt-dlp"):
+        raise HTTPException(status_code=503, detail="yt-dlp is not installed.")
+    if not ffmpeg_available():
+        raise HTTPException(status_code=503, detail="ffmpeg is not installed.")
+
+    # Best video + best audio, or a single combined format when one exists.
+    # The URLs yt-dlp prints are signed and short-lived, so they are consumed
+    # immediately rather than handed to the browser.
+    media = await resolve_yt_media(url)
+
+    host = next((urlparse(m).hostname for m in media if urlparse(m).hostname), parsed.hostname)
+    ip = await asyncio.to_thread(resolve_ip, host) if host else None
+    log_source("url", url, host, ip)
+
+    emit("stream", f"Streaming {parsed.netloc} via yt-dlp", level="warn")
+    process = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-loglevel", "error",
+        *(arg for source in media for arg in ("-i", source)),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-ac", "2",
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "-f", "mp4", "pipe:1",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+
+    async def chunks():
+        try:
+            while True:
+                chunk = await process.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            # The page navigating away should not leave ffmpeg running.
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+
+    return StreamingResponse(chunks(), media_type="video/mp4", headers={
+        "cache-control": "no-store",
+    })
+
+
+@app.get("/hls")
+async def hls(url: str | None = None, yt: str | None = None) -> RedirectResponse:
+    """Start an HLS transcode and redirect to its playlist.
+
+    iOS Safari plays fragmented MP4 only through MSE, so the frontend routes the
+    same sources here on iOS. `yt` is a watch page, `url` a direct media URL, and
+    neither means the command-line file — mirroring `/stream`.
+    """
+    if yt:
+        media = await resolve_yt_media(yt)
+        host = next((urlparse(m).hostname for m in media if urlparse(m).hostname), urlparse(yt).hostname)
+        ip = await asyncio.to_thread(resolve_ip, host) if host else None
+        log_source("url", yt, host, ip)
+        emit("stream", f"Streaming {urlparse(yt).netloc} via yt-dlp (HLS)", level="warn")
+        stream_id = await spawn_hls(media)
+    elif url:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise HTTPException(status_code=400, detail="Only http(s) URLs can be streamed.")
+        ip = await asyncio.to_thread(resolve_ip, parsed.hostname)
+        log_source("url", url, parsed.hostname, ip)
+        emit("stream", "Transcoding via HLS", level="warn")
+        stream_id = await spawn_hls([url])
+    else:
+        path: Path | None = CONFIG["video_path"]
+        if path is None:
+            raise HTTPException(status_code=404, detail="No file to stream.")
+        log_source("file", str(path))
+        emit("stream", f"Transcoding {path.name} via HLS", level="warn")
+        stream_id = await spawn_hls([str(path)])
+
+    return RedirectResponse(f"/hls/{stream_id}/index.m3u8", status_code=303)
+
+
+@app.get("/hls/{stream_id}/{filename}")
+async def hls_file(stream_id: str, filename: str) -> FileResponse:
+    """Serve a playlist or segment from an active HLS transcode."""
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=404)
+    path = (HLS_DIR / stream_id / filename).resolve()
+    if HLS_DIR.resolve() not in path.parents:
+        raise HTTPException(status_code=404)
+    if not path.is_file():
+        raise HTTPException(status_code=404)
+    media_type = "application/vnd.apple.mpegurl" if filename.endswith(".m3u8") else "video/mp2t"
+    return FileResponse(path, media_type=media_type, headers={"cache-control": "no-store"})
 
 
 def write_case(note: str, view: Any, thresholds: Any) -> Path:
@@ -810,7 +1121,7 @@ async def runtime_file(name: str) -> FileResponse:
     return FileResponse(path, filename=name, media_type="application/json")
 
 
-def clear_cast(title: str, season: int | None) -> None:
+def clear_cast(title: str, season: int | None, note: str | None = None) -> None:
     """Record that this video has no cast, and persist that.
 
     Writing the empty result matters as much as clearing memory: leaving the
@@ -820,7 +1131,7 @@ def clear_cast(title: str, season: int | None) -> None:
         "title": title, "season": season, "source_page": None, "characters": {},
     }, indent=2) + "\n")
     apply_cast()
-    emit("cast", f"Cast cleared — nothing found for {title!r}", level="warn")
+    emit("cast", note or f"Cast cleared — nothing found for {title!r}", level="warn")
 
 
 @app.get("/api/events")
@@ -947,6 +1258,13 @@ async def api_cast(request: Request, name: str = Form(...)) -> JSONResponse:
         "source": CAST_SOURCE,
         "characters": CHARACTER_NAMES,
     })
+
+
+@app.post("/api/cast/clear")
+async def api_cast_clear() -> JSONResponse:
+    """Forget the current cast — a watch URL has no show name to look up."""
+    clear_cast("watch URL", None, note="Cast cleared — no show name to look up")
+    return JSONResponse({"status": "cleared", "source": CAST_SOURCE, "characters": CHARACTER_NAMES})
 
 
 @app.post("/api/detect")

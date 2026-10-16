@@ -75,6 +75,8 @@ same thing (IoU ≥ 0.5) collapse into the most confident one, client-side.
 ```
 build-python.sh      prepare the Python app
 run-python.sh        launch it
+run-server.sh        launch it on 0.0.0.0 for phone testing
+create-cloudflare-tunnel.sh   expose that through a Cloudflare quick tunnel
 ARCHITECTURE.md      how the system works, in detail
 CHANGELOG.md         what changed, newest first
 python/              the Python implementation
@@ -135,7 +137,17 @@ sample when you pass flags but no file. To skip it and open the page yourself:
 ```
 
 Either way the app lands on http://127.0.0.1:8000. With no file at all, the
-page's **Open file…** button takes any video your browser can play.
+page's **Open file…** button takes any video your browser can play, and
+**Open URL** plays any http(s) URL — proxied through the backend so frame
+capture is not blocked by cross-origin restrictions. YouTube and other
+`yt-dlp`-supported watch URLs play too, resolved and merged server-side (needs
+`yt-dlp` on the machine running the app).
+
+On iOS those streams are served as HLS instead of a fragmented MP4 — Safari
+will not open a fragmented MP4 in a plain `<video>`. The page detects iOS and
+points the video at an `.m3u8` playlist, which plays natively; desktop keeps
+the fragmented-MP4 path. The source URL and the IP it resolves to are not
+shown on the page: they go to the server console and to `GET /api/last`.
 
 ```bash
 ./python/app.py --help
@@ -351,6 +363,10 @@ previous show's — another show's characters on this video is worse than none.
 The header turns red and reads `cast: none found for <title>`, and the reason
 goes to the error line. The empty result is written to `cast.json` too, so a
 restart does not bring the old cast back.
+
+A YouTube URL has no filename to parse a show from, so opening one clears the
+cast the same way — the header reads `cast: none` — instead of keeping the
+previous show's.
 
 With no cast, people are still found and boxed, just not named: the
 per-character questions and the identity Choice are skipped, which on a

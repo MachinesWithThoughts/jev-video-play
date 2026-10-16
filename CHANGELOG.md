@@ -8,6 +8,27 @@ header identify a running copy; this file explains what changed between them.
 ## [Unreleased]
 
 ### Added
+- **Open a video from a URL.** A **Open URL** field in the header plays any
+  http(s) URL. The backend proxies the bytes same-origin so the frames the
+  page captures are not tainted (a cross-origin `<video>` blocks frame
+  capture unless the host sends CORS headers, which most do not), and Range
+  requests are forwarded so seeking still works. If the browser cannot decode
+  a URL-sourced video, the ffmpeg fallback now transcodes the remote URL
+  directly.
+- **YouTube (and other yt-dlp sites) play from a watch URL.** Watch pages are
+  HTML, not media, so they are resolved with `yt-dlp` and merged with ffmpeg
+  into a fragmented MP4 stream. YouTube serves separate video and audio DASH
+  streams, which is why a plain proxy could not play them.
+- **iOS plays YouTube and transcoded streams via HLS.** iOS Safari will not
+  open a fragmented MP4 in a plain `<video>` (it only does fragmented MP4
+  through Media Source Extensions), so a phone showed nothing where the desktop
+  played fine. On iOS the same sources are now served as HLS instead: ffmpeg
+  transcodes to an event playlist under `/hls` and the page points the video at
+  the `.m3u8`, which Safari plays natively. Desktop keeps the fragmented-MP4
+  endpoints. Only one HLS transcode runs at a time — starting another stops the
+  previous one and deletes its files, so the temp directory cannot fill up.
+- **`GET /api/last`** returns the last URL or file the app was asked to play,
+  with the host and IP the bytes resolve to.
 - **The Boxes list and the detections panel are linked both ways.** Clicking
   a box highlights and scrolls to its row, drawn heavier in its own colour;
   clicking a row turns that row and its box orange. A selected box is drawn
@@ -46,6 +67,12 @@ header identify a running copy; this file explains what changed between them.
 - Syntax highlighting for the raw Jev response.
 
 ### Changed
+- **The source URL and its host IP no longer show on the page.** They are
+  written to the server console (`source: …`) and queryable at `GET /api/last`.
+- **A YouTube URL clears the cast.** A watch URL has no show name to look a
+  cast up from, so playing one now forgets whatever cast the previous video
+  left behind (and persists the empty result) instead of silently keeping it —
+  the header reads `cast: none`.
 - **Detections no longer post an event per frame.** One line per frame buried
   everything else; the Calls card already shows latency, tokens and question
   count. Failed detections are still reported.
@@ -70,6 +97,10 @@ header identify a running copy; this file explains what changed between them.
   instead.
 
 ### Fixed
+- **The source pane collapsed to a sliver on iOS.** An HLS stream reports its
+  dimensions only after `loadedmetadata` (they read 0 there), and writing
+  `aspect-ratio: 0 / 0` collapses the stage. The pane now sizes itself only
+  once both dimensions are known, on `loadedmetadata`, `loadeddata` or `resize`.
 - **Cast tables parsed by position produced episode titles as character
   names.** Columns are now located by their headers and rows laid onto a grid
   honouring `colspan` and `rowspan`. Fixed Doctor Who, and Battlestar, whose

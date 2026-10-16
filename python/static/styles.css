@@ -341,6 +341,19 @@ select {
 .snap input::placeholder { color: var(--ink-dim); }
 .snap input:focus { outline: none; border-color: var(--accent); }
 
+.url { display: inline-flex; align-items: center; gap: 6px; }
+.url input {
+  width: 260px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+}
+.url input::placeholder { color: var(--ink-dim); }
+.url input:focus { outline: none; border-color: var(--accent); }
+
 .empty.gate {
   background: rgba(12, 15, 20, .82);
   z-index: 2;

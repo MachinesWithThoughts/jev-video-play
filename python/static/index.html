@@ -27,6 +27,10 @@
     <input id="file" type="file"
            accept="video/*,.mkv,.avi,.mov,.m4v,.webm,.ts,.m2ts,.mts,.mpg,.mpeg,.wmv,.flv,.ogv,.3gp"
            hidden>
+    <span class="url">
+      <input type="text" id="url" placeholder="https://…/video.mp4" spellcheck="false">
+      <button class="btn" id="open-url" type="button">Open URL</button>
+    </span>
   </div>
 </header>
 
@@ -73,7 +77,7 @@
         <span class="hint">Detection uses the previous show's characters until this lands.</span>
         <button class="btn" id="gate-skip" type="button">Play anyway</button></p>
       <p class="empty" id="empty-video">Drop a video here, or use <b>Open file…</b><br>
-        <span class="hint">You can also pass one on the command line.</span></p>
+        <span class="hint">You can also pass one on the command line, or open a URL with <b>Open URL</b>.</span></p>
     </div>
   </figure>
 
