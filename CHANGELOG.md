@@ -13,6 +13,10 @@ header identify a running copy; this file explains what changed between them.
   clicking a row turns that row and its box orange. A selected box is drawn
   even when it was gated out, labelled with why. Overlapping boxes resolve to
   the smallest under the pointer.
+- **The Events panel carries viewer actions**, not just backend work: opening
+  a file, what it turned out to be, a file the browser cannot decode, and
+  **Play anyway**. The page posts to the same stream, so everything stays in
+  one order.
 - **Events panel.** An expandable live tail of backend telemetry over
   server-sent events: each step of a cast lookup, every detection with its
   question count, latency and tokens, transcodes, snapshots and failures. The

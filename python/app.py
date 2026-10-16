@@ -828,6 +828,29 @@ async def api_events(since: int = 0) -> JSONResponse:
     return JSONResponse({"events": [e for e in EVENTS if e["seq"] > since]})
 
 
+@app.post("/api/events")
+async def api_event(
+    message: str = Form(...),
+    level: str = Form("info"),
+    detail: str = Form(""),
+) -> JSONResponse:
+    """Let the page add to the same stream.
+
+    Opening a file happens entirely in the browser — the backend never sees
+    it unless a detection follows — so without this the log jumps from one
+    show's cast to another with nothing explaining why.
+    """
+    try:
+        extra = json.loads(detail) if detail else {}
+    except ValueError:
+        extra = {}
+    if not isinstance(extra, dict):
+        extra = {"detail": extra}
+
+    emit("user", message[:300], level=level if level in ("info", "warn", "error") else "info", **extra)
+    return JSONResponse({"ok": True})
+
+
 @app.get("/api/events/stream")
 async def api_events_stream() -> StreamingResponse:
     """Server-sent events: the recent history, then everything as it happens."""

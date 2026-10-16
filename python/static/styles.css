@@ -417,3 +417,5 @@ select {
   box-shadow: inset 2px 0 0 #ff9f1c;
 }
 .box-row.selected.from-list .name { color: #ff9f1c; }
+
+.event-log li.user .kind { color: var(--ok); }

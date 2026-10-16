@@ -367,7 +367,12 @@ anything that isn't Star Trek.
 
 An expandable **Events** panel at the foot of the page tails what the backend
 is doing, over server-sent events: each step of a cast lookup as it happens,
-transcodes, snapshots, and failures including a detection that errors. Cast
+transcodes, snapshots, and failures including a detection that errors.
+
+It carries what you do, too — opening a file, the dimensions and duration it
+turned out to have, a file the browser could not decode, **Play anyway**.
+Opening a file happens entirely in the browser, so without this the log jumps
+from one show's cast to another with nothing explaining why. Cast
 lookups take tens of seconds and were otherwise just a spinner.
 
 Successful detections are deliberately not logged — one line per frame buried

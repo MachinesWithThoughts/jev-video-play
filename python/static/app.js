@@ -104,6 +104,10 @@ async function boot() {
 let objectUrl = null;
 
 function playFile(file) {
+  logEvent(`Opened ${file.name}`, {
+    megabytes: +(file.size / 1048576).toFixed(1),
+    type: file.type || "unknown",
+  });
   state.serverSide = false;
   state.transcoding = false;
   if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -148,6 +152,7 @@ function setDetectionBlocked(blocked) {
 }
 
 function skipGate() {
+  logEvent("Play anyway — playing before the cast finished loading", null, "warn");
   state.castSkipped = true;
   $("cast-gate").hidden = true;
   // Detecting now uses the cast still in memory; the snapshot records which.
@@ -243,6 +248,7 @@ function wireControls() {
     // If the file is one the backend can reach, hand it to ffmpeg instead of
     // giving up: Matroska and AC-3 are common in rips and unplayable here.
     if (state.serverSide && state.cfg.can_transcode && !state.transcoding) {
+      logEvent("Browser cannot decode this file; falling back to ffmpeg", null, "warn");
       state.transcoding = true;
       $("empty-video").hidden = false;
       $("empty-video").innerHTML =
@@ -260,6 +266,7 @@ function wireControls() {
       : code === 3
         ? "This file is damaged, or uses a codec your browser can't decode."
         : "That file could not be loaded.";
+    logEvent(`Cannot play ${state.videoName || "this file"}: ${why}`, null, "error");
     showVideoError(why);
   });
 
@@ -300,7 +307,17 @@ function wireControls() {
     redraw();
   });
 
+  let lastReady = "";
   video.addEventListener("loadedmetadata", () => {
+    // Fires again on re-load of the same source; only say so once per file.
+    const signature = `${state.videoName}|${video.videoWidth}x${video.videoHeight}|${video.duration}`;
+    if (signature !== lastReady) {
+      lastReady = signature;
+      logEvent(
+        `Playable: ${video.videoWidth}x${video.videoHeight}, ${fmtTime(video.duration)}`,
+        { video: state.videoName || null },
+      );
+    }
     $("stage-video").style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
   });
 
@@ -754,6 +771,16 @@ function renderBoxList() {
 
 const EVENT_LIMIT = 300;
 let eventCount = 0;
+
+// Report something the viewer did, so it lands in the same ordered stream as
+// the backend's own events rather than a separate list.
+function logEvent(message, detail, level) {
+  const body = new FormData();
+  body.append("message", message);
+  if (level) body.append("level", level);
+  if (detail) body.append("detail", JSON.stringify(detail));
+  fetch("/api/events", { method: "POST", body }).catch(() => {});
+}
 
 // A live tail of what the backend is doing. Cast lookups take tens of seconds
 // and were previously silent apart from a spinner.

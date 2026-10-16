@@ -196,6 +196,11 @@ rebuild takes tens of seconds and why playback is gated while it runs.
 cast builder takes a `log` callable, so its progress becomes events for free.
 Only things that happen occasionally are logged — a successful detection is
 not, since one line per frame drowns out everything worth reading.
+
+The page posts its own events to `POST /api/events` rather than keeping a
+separate list, so viewer actions and backend work share one ordered stream.
+Opening a file is invisible to the backend until a detection follows, which
+would otherwise leave an unexplained jump between casts.
 Emission is thread-safe: lookups run off the loop via `asyncio.to_thread`, so
 the fan-out is scheduled back with `call_soon_threadsafe`.
 
