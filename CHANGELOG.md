@@ -21,6 +21,9 @@ header identify a running copy; this file explains what changed between them.
 - **Box labels that overlap drop to the bottom.** When a box label would sit
   on top of one already drawn, it is moved to the bottom of its box instead of
   burying the earlier label.
+- **Cast lookup includes the actor.** Each character's description now ends
+  with `(played by <actor>)` (or is `played by <actor>` when there is no visual
+  line), so the cast editor and the questions show who plays the part.
 
 ## [0.3.0] — 2026-10-16
 

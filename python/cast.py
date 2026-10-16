@@ -882,6 +882,7 @@ def build_cast(
         log("==> Describing each character")
         for entry in cast:
             formal = entry["character"]
+            actor = entry["actor"]
             look, source = "", "none"
             if descriptions:
                 known = KNOWN_LOOKS.get(formal.lower())
@@ -894,13 +895,19 @@ def build_cast(
                     else:
                         look = describe(brave, formal, title)
                         source = "search" if look else "none"
+
+            # The description is what app.py reads as `look`, so fold the actor's
+            # name in here rather than carrying a separate field downstream.
+            if actor:
+                look = f"{look} (played by {actor})" if look else f"played by {actor}"
+
             slug = slugify(formal) or f"character_{len(characters) + 1}"
             while slug in characters:
                 slug = f"{slug}_{len(characters) + 1}"
             characters[slug] = {
                 "name": names[formal],
                 "formal": formal,
-                "actor": entry["actor"],
+                "actor": actor,
                 "qualifier": entry.get("qualifier"),
                 "description": look,
                 "source": source,
