@@ -199,15 +199,23 @@ def clean_title(stem: str) -> tuple[str, int | None]:
     return re.sub(r"\s+", " ", title), year
 
 
-def parse_filename(name: str) -> tuple[str, int | None, int | None]:
-    """Pull a show or film title, a season number and a year out of a filename."""
+def parse_filename(name: str) -> tuple[str, int | None, int | None, int | None]:
+    """Pull a title, season, year and episode out of a filename.
+
+    Recognises `S01E02` / `s01e02` and the scene-release `1x02` / `[1x02]`
+    forms, so a bracketed episode tag does not end up in the title.
+    """
     stem = Path(name).stem
 
     season = None
-    match = re.search(r"[Ss](\d{1,2})[\s._-]?[Ee]\d{1,3}", stem)
+    episode = None
+    match = re.search(r"[Ss](\d{1,2})[\s._-]?[Ee](\d{1,3})", stem)
+    if not match:
+        match = re.search(r"[\[(]?(\d{1,2})\s*[xX]\s*(\d{1,3})[\])]?", stem)
     if match:
         season = int(match.group(1))
-        stem = stem[: match.start()]
+        episode = int(match.group(2))
+        stem = stem[: match.start()].rstrip(" -_.[( ")
     else:
         match = re.search(r"\bseason[\s._-]*(\d{1,2})\b", stem, re.I)
         if match:
@@ -215,7 +223,7 @@ def parse_filename(name: str) -> tuple[str, int | None, int | None]:
             stem = stem[: match.start()]
 
     title, year = clean_title(stem)
-    return title, season, year
+    return title, season, year, episode
 
 
 class Brave:
@@ -813,7 +821,7 @@ def build_cast(
     log=print,
 ) -> dict:
     """Find the video's cast and describe each character. Used by app.py too."""
-    title, parsed_season, year = parse_filename(video)
+    title, parsed_season, year, _episode = parse_filename(video)
     season = season or parsed_season
     log(f"Title:  {title}")
     log(f"Season: {season if season else 'all'}")

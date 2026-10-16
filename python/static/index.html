@@ -20,7 +20,7 @@
     <span class="sep">·</span>
     <span id="model-name">—</span>
     <span class="sep">·</span>
-    <span id="cast-info">cast: —</span>
+    <button id="cast-info" class="cast-btn" type="button" title="View or edit the cast">cast: —</button>
   </div>
   <div class="bar-actions">
     <label class="btn" for="file">Open file…</label>
@@ -147,6 +147,39 @@
   </div>
   <pre id="raw">—</pre>
 </details>
+
+<div class="modal-backdrop" id="cast-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cast-modal-title">
+    <header class="modal-head">
+      <h2 id="cast-modal-title">Cast</h2>
+      <button class="modal-x" id="cast-close" type="button" aria-label="Close">&times;</button>
+    </header>
+    <div class="modal-body">
+      <div class="cast-meta">
+        <label class="field">Show name
+          <input type="text" id="cast-title" placeholder="e.g. Postman Pat" spellcheck="false">
+        </label>
+        <label class="field">Season
+          <input type="number" id="cast-season" min="0" step="1" placeholder="—">
+        </label>
+        <label class="field">Episode
+          <input type="number" id="cast-episode" min="0" step="1" placeholder="—">
+        </label>
+      </div>
+      <p class="modal-note muted" id="cast-note"></p>
+      <div class="cast-rows" id="cast-list"></div>
+      <button class="btn" id="cast-add" type="button">+ Add character</button>
+      <details class="cast-library" id="cast-library">
+        <summary>Saved casts</summary>
+        <ul id="cast-library-list"></ul>
+      </details>
+    </div>
+    <footer class="modal-foot">
+      <button class="btn primary" id="cast-save" type="button">Save</button>
+      <button class="btn" id="cast-cancel" type="button">Close</button>
+    </footer>
+  </div>
+</div>
 
 <script src="/static/app.js"></script>
 </body>

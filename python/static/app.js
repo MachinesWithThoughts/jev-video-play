@@ -99,6 +99,7 @@ async function boot() {
   }
 
   wireControls();
+  wireCastModal();
   startEventLog();
   requestAnimationFrame(tick);
 }
@@ -279,6 +280,143 @@ async function clearCast() {
   try {
     await fetch("/api/cast/clear", { method: "POST" });
   } catch {}
+}
+
+// ---------------------------------------------------------------- cast editor
+
+function wireCastModal() {
+  $("cast-info").addEventListener("click", openCastModal);
+  $("cast-close").addEventListener("click", closeCastModal);
+  $("cast-cancel").addEventListener("click", closeCastModal);
+  $("cast-add").addEventListener("click", () => addCharacterRow());
+  $("cast-save").addEventListener("click", saveCast);
+  $("cast-modal").addEventListener("click", (event) => {
+    if (event.target === $("cast-modal")) closeCastModal();
+  });
+}
+
+function openCastModal() {
+  fetch("/api/cast/current")
+    .then((response) => response.json())
+    .then((data) => {
+      $("cast-title").value = data.title || "";
+      $("cast-season").value = data.season ?? "";
+      $("cast-episode").value = data.episode ?? "";
+      $("cast-note").textContent = data.source ? `Current cast: ${data.source}` : "";
+      renderCharacterRows(data.characters || []);
+      renderCastLibrary(data.library || []);
+      $("cast-modal").hidden = false;
+    })
+    .catch((error) => showError({ detail: `Could not load cast: ${error}` }));
+}
+
+function closeCastModal() {
+  $("cast-modal").hidden = true;
+}
+
+function renderCharacterRows(characters) {
+  const list = $("cast-list");
+  list.replaceChildren();
+  if (!characters.length) characters = [{}];
+  for (const character of characters) {
+    addCharacterRow(character.name || "", character.look || "");
+  }
+}
+
+function addCharacterRow(name = "", look = "") {
+  const row = document.createElement("div");
+  row.className = "cast-row";
+
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.className = "cast-name";
+  nameInput.placeholder = "Character name";
+  nameInput.value = name;
+
+  const lookInput = document.createElement("input");
+  lookInput.type = "text";
+  lookInput.className = "cast-look";
+  lookInput.placeholder = "What they look like (optional)";
+  lookInput.value = look;
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "btn cast-remove";
+  remove.textContent = "\u00d7";
+  remove.title = "Remove";
+  remove.addEventListener("click", () => row.remove());
+
+  row.append(nameInput, lookInput, remove);
+  $("cast-list").appendChild(row);
+}
+
+function renderCastLibrary(library) {
+  const list = $("cast-library-list");
+  list.replaceChildren();
+  $("cast-library").hidden = library.length === 0;
+  for (const entry of library) {
+    const item = document.createElement("li");
+    item.className = "cast-library-item";
+    const parts = [entry.title];
+    if (entry.season) parts.push(`S${entry.season}`);
+    if (entry.episode) parts.push(`E${entry.episode}`);
+    item.textContent = `${parts.join(" \u00b7 ")} (${entry.count})`;
+    item.title = "Load this cast";
+    item.addEventListener("click", () => loadLibraryCast(entry));
+    list.appendChild(item);
+  }
+}
+
+function loadLibraryCast(entry) {
+  const body = new FormData();
+  body.append("key", entry.key);
+  fetch("/api/cast/load", { method: "POST", body })
+    .then((response) => response.json())
+    .then((data) => {
+      if (data.status === "loaded") {
+        $("cast-title").value = data.title || "";
+        $("cast-season").value = data.season ?? "";
+        $("cast-episode").value = data.episode ?? "";
+        $("cast-note").textContent = data.source ? `Loaded: ${data.source}` : "";
+        renderCharacterRows(data.characters || []);
+        state.cfg.cast_source = data.source;
+        showCast(data.source);
+      }
+    })
+    .catch((error) => showError({ detail: `Could not load cast: ${error}` }));
+}
+
+function saveCast() {
+  const title = $("cast-title").value.trim();
+  if (!title) {
+    showError({ detail: "Show name is required." });
+    return;
+  }
+  const characters = [...$("cast-list").querySelectorAll(".cast-row")]
+    .map((row) => ({
+      name: row.querySelector(".cast-name").value.trim(),
+      look: row.querySelector(".cast-look").value.trim(),
+    }))
+    .filter((entry) => entry.name);
+
+  const body = new FormData();
+  body.append("title", title);
+  body.append("season", $("cast-season").value);
+  body.append("episode", $("cast-episode").value);
+  body.append("characters", JSON.stringify(characters));
+
+  fetch("/api/cast/save", { method: "POST", body })
+    .then((response) => response.json())
+    .then((data) => {
+      if (data.status === "saved") {
+        state.cfg.cast_source = data.source;
+        showCast(data.source);
+        closeCastModal();
+      } else {
+        showError({ detail: data.detail || "Could not save cast." });
+      }
+    })
+    .catch((error) => showError({ detail: `Could not save cast: ${error}` }));
 }
 
 function loadSource(url, name) {

@@ -368,6 +368,12 @@ A YouTube URL has no filename to parse a show from, so opening one clears the
 cast the same way — the header reads `cast: none` — instead of keeping the
 previous show's.
 
+The cast readout in the header is a button. Clicking it opens an editor where
+you can type a cast by hand — characters plus what they look like — along with
+the show name, season and episode. Saving writes it to `python/casts.json`,
+keyed by show/season/episode, so opening that show again reuses your entry
+instead of re-searching; the editor's **Saved casts** list loads any entry back.
+
 With no cast, people are still found and boxed, just not named: the
 per-character questions and the identity Choice are skipped, which on a
 10-slot frame is 21 questions instead of 61.

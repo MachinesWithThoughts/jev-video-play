@@ -7,6 +7,16 @@ header identify a running copy; this file explains what changed between them.
 
 ## [Unreleased]
 
+### Added
+- **A cast editor.** The cast readout in the header is now a button that opens
+  a modal showing the current cast, where you can add, edit or remove
+  characters and their appearance descriptions, and give the show a name,
+  season and episode. Saving writes the cast to a library (`python/casts.json`)
+  keyed by show/season/episode, so opening the same show again reuses the
+  hand-entered cast instead of re-running the Brave lookup, and a "Saved casts"
+  list reloads any entry. Filename parsing now also recognises the
+  scene-release `1x02` / `[1x02]` episode form.
+
 ## [0.2.0] — 2026-10-16
 
 ### Added

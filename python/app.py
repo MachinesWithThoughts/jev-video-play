@@ -231,9 +231,12 @@ LAST_CALL: dict[str, Any] = {}
 LAST_CAST_LOOKUP: dict[str, Any] = {}
 
 
-def load_cast() -> tuple[dict[str, dict[str, str]], str | None]:
+def load_cast() -> tuple[dict[str, dict[str, str]], str | None, str | None, int | None, int | None]:
     """Read cast.json if `cast.py` has written one, else the built-in cast."""
     source = None
+    title: str | None = None
+    season: int | None = None
+    episode: int | None = None
     rows = DEFAULT_CAST
 
     if CAST_FILE.is_file():
@@ -252,8 +255,10 @@ def load_cast() -> tuple[dict[str, dict[str, str]], str | None]:
                     )
                     for slug, info in found.items()
                 }
+                title = data.get("title")
                 season = data.get("season")
-                source = data.get("title") or "cast.json"
+                episode = data.get("episode")
+                source = title or "cast.json"
                 if season:
                     source = f"{source} season {season}"
                 if not rows:
@@ -265,23 +270,93 @@ def load_cast() -> tuple[dict[str, dict[str, str]], str | None]:
         slug: {"formal": formal, "name": name, "look": look}
         for slug, (formal, name, look) in rows.items()
     }
-    return cast, source
+    return cast, source, title, season, episode
 
 
 CHARACTERS: dict[str, dict[str, str]] = {}
 CHARACTER_NAMES: dict[str, str] = {}
 CAST_SOURCE: str | None = None
+CAST_TITLE: str | None = None
+CAST_SEASON: int | None = None
+CAST_EPISODE: int | None = None
+
+# Manually-entered casts, keyed by "title|season|episode", so a hand-written
+# cast is reused the next time the same show opens instead of re-searched.
+CAST_LIBRARY_FILE = HERE / "casts.json"
 
 
 def apply_cast() -> None:
     """(Re)read cast.json into the module globals the questions are built from."""
-    global CHARACTERS, CHARACTER_NAMES, CAST_SOURCE
-    CHARACTERS, CAST_SOURCE = load_cast()
+    global CHARACTERS, CHARACTER_NAMES, CAST_SOURCE, CAST_TITLE, CAST_SEASON, CAST_EPISODE
+    CHARACTERS, CAST_SOURCE, CAST_TITLE, CAST_SEASON, CAST_EPISODE = load_cast()
     CHARACTER_NAMES = {slug: entry["name"] for slug, entry in CHARACTERS.items()}
     CHARACTER_NAMES["other"] = "Unknown"
 
 
 apply_cast()
+
+
+def load_library() -> dict[str, dict[str, Any]]:
+    """All saved casts, keyed by title|season|episode."""
+    try:
+        data = json.loads(CAST_LIBRARY_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def cast_key(title: str, season: int | None, episode: int | None) -> str:
+    return (
+        f"{cast_builder.slugify(title)}"
+        f"|{season if season is not None else ''}"
+        f"|{episode if episode is not None else ''}"
+    )
+
+
+def save_to_library(payload: dict[str, Any]) -> None:
+    library = load_library()
+    library[cast_key(payload["title"], payload.get("season"), payload.get("episode"))] = payload
+    CAST_LIBRARY_FILE.write_text(json.dumps(library, indent=2) + "\n")
+
+
+def standard_cast(payload: dict[str, Any]) -> dict[str, Any]:
+    """The fields cast.json keeps — everything except the library's saved_at."""
+    return {
+        "title": payload.get("title"),
+        "season": payload.get("season"),
+        "episode": payload.get("episode"),
+        "source_page": payload.get("source_page"),
+        "characters": payload.get("characters", {}),
+    }
+
+
+def reusable_cast(title: str, season: int | None, episode: int | None) -> dict[str, Any] | None:
+    """A saved cast for this show, if one fits.
+
+    A cast rarely changes between episodes, so an episode-specific entry is
+    preferred when it matches exactly, then any entry for the season, then a
+    show-level entry with no season recorded.
+    """
+    slug = cast_builder.slugify(title)
+    candidates = [
+        entry for entry in load_library().values()
+        if cast_builder.slugify(entry.get("title", "")) == slug
+    ]
+    if not candidates:
+        return None
+    season_matches = [entry for entry in candidates if entry.get("season") == season]
+    if season_matches:
+        exact = next((e for e in season_matches if e.get("episode") == episode), None)
+        return exact or season_matches[0]
+    return next((e for e in candidates if e.get("season") is None), None)
+
+
+def _as_int(value: str) -> int | None:
+    text = str(value).strip()
+    try:
+        return int(text) if text else None
+    except ValueError:
+        return None
 
 
 def cast_criteria() -> dict[str, str]:
@@ -1128,7 +1203,7 @@ def clear_cast(title: str, season: int | None, note: str | None = None) -> None:
     previous show's cast.json behind would bring it back on the next start.
     """
     CAST_FILE.write_text(json.dumps({
-        "title": title, "season": season, "source_page": None, "characters": {},
+        "title": title, "season": season, "episode": None, "source_page": None, "characters": {},
     }, indent=2) + "\n")
     apply_cast()
     emit("cast", note or f"Cast cleared — nothing found for {title!r}", level="warn")
@@ -1195,7 +1270,7 @@ async def api_cast(request: Request, name: str = Form(...)) -> JSONResponse:
     cast.json is read once at startup, so opening a different file in the page
     would otherwise keep asking about the previous show's characters.
     """
-    title, season, year = cast_builder.parse_filename(name)
+    title, season, year, episode = cast_builder.parse_filename(name)
     wanted = f"{title} season {season}" if season else title
     LAST_CAST_LOOKUP.update({
         "video": name, "title": title, "season": season, "year": year,
@@ -1204,9 +1279,22 @@ async def api_cast(request: Request, name: str = Form(...)) -> JSONResponse:
     emit("cast", f"Lookup requested for {title!r}", season=season, year=year, video=name)
 
     async with CAST_LOCK:
+        # A hand-entered cast for this show wins over a fresh search.
+        apply_cast()
+        reused = reusable_cast(title, season, episode)
+        if reused:
+            CAST_FILE.write_text(json.dumps(standard_cast(reused), indent=2) + "\n")
+            apply_cast()
+            LAST_CAST_LOOKUP.update({"status": "reused", "detail": None})
+            emit("cast", f"Reused saved cast: {CAST_SOURCE}", characters=len(CHARACTERS))
+            return JSONResponse({
+                "status": "reused",
+                "source": CAST_SOURCE,
+                "characters": CHARACTER_NAMES,
+            })
+
         # Already the right show (perhaps from a previous load): just re-read
         # the file, which also picks up a cast.py run made while we were up.
-        apply_cast()
         if CAST_SOURCE and CAST_SOURCE.lower() == wanted.lower():
             LAST_CAST_LOOKUP.update({"status": "unchanged", "detail": None})
             emit("cast", f"Already loaded: {CAST_SOURCE}", characters=len(CHARACTERS))
@@ -1265,6 +1353,102 @@ async def api_cast_clear() -> JSONResponse:
     """Forget the current cast — a watch URL has no show name to look up."""
     clear_cast("watch URL", None, note="Cast cleared — no show name to look up")
     return JSONResponse({"status": "cleared", "source": CAST_SOURCE, "characters": CHARACTER_NAMES})
+
+
+@app.get("/api/cast/current")
+async def api_cast_current() -> JSONResponse:
+    """The active cast and the saved library, for the cast editor."""
+    return JSONResponse({
+        "title": CAST_TITLE,
+        "season": CAST_SEASON,
+        "episode": CAST_EPISODE,
+        "source": CAST_SOURCE,
+        "characters": [
+            {"name": entry["formal"], "look": entry["look"]}
+            for entry in CHARACTERS.values()
+        ],
+        "library": [
+            {
+                "key": cast_key(entry.get("title", ""), entry.get("season"), entry.get("episode")),
+                "title": entry.get("title"),
+                "season": entry.get("season"),
+                "episode": entry.get("episode"),
+                "count": len(entry.get("characters", {})),
+            }
+            for entry in load_library().values()
+        ],
+    })
+
+
+@app.post("/api/cast/save")
+async def api_cast_save(
+    title: str = Form(""),
+    season: str = Form(""),
+    episode: str = Form(""),
+    characters: str = Form("[]"),
+) -> JSONResponse:
+    """Store a hand-entered cast, keyed by show/season/episode for later reuse."""
+    if not title.strip():
+        return JSONResponse({"status": "error", "detail": "Show name is required."},
+                            status_code=400)
+
+    season_val = _as_int(season)
+    episode_val = _as_int(episode)
+    try:
+        entries = json.loads(characters or "[]")
+        if not isinstance(entries, list):
+            entries = []
+    except ValueError:
+        entries = []
+
+    chars: dict[str, dict[str, str]] = {}
+    for index, entry in enumerate(entries):
+        name = str(entry.get("name") or "").strip() if isinstance(entry, dict) else ""
+        if not name:
+            continue
+        look = str(entry.get("look") or "").strip() if isinstance(entry, dict) else ""
+        slug = cast_builder.slugify(name) or f"character_{index + 1}"
+        while slug in chars:
+            slug = f"{slug}_{index + 1}"
+        chars[slug] = {
+            "formal": name, "name": name, "actor": "", "description": look, "source": "manual",
+        }
+
+    payload = {
+        "title": title.strip(),
+        "season": season_val,
+        "episode": episode_val,
+        "source_page": None,
+        "characters": chars,
+        "saved_at": time.time(),
+    }
+
+    save_to_library(payload)
+    CAST_FILE.write_text(json.dumps(standard_cast(payload), indent=2) + "\n")
+    apply_cast()
+    emit("cast", f"Saved manual cast: {CAST_SOURCE} ({len(chars)} characters)",
+         characters=len(chars))
+    return JSONResponse({"status": "saved", "source": CAST_SOURCE, "characters": CHARACTER_NAMES})
+
+
+@app.post("/api/cast/load")
+async def api_cast_load(key: str = Form(...)) -> JSONResponse:
+    """Make a saved library cast the active one."""
+    entry = load_library().get(key)
+    if not entry:
+        return JSONResponse({"status": "notfound", "detail": "No such saved cast."},
+                            status_code=404)
+    CAST_FILE.write_text(json.dumps(standard_cast(entry), indent=2) + "\n")
+    apply_cast()
+    emit("cast", f"Loaded saved cast: {CAST_SOURCE}", characters=len(CHARACTERS))
+    return JSONResponse({
+        "status": "loaded",
+        "source": CAST_SOURCE,
+        "title": CAST_TITLE,
+        "season": CAST_SEASON,
+        "episode": CAST_EPISODE,
+        "characters": [{"name": e["formal"], "look": e["look"]} for e in CHARACTERS.values()],
+    })
 
 
 @app.post("/api/detect")

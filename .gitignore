@@ -6,6 +6,7 @@
 __pycache__/
 .freebuff/
 python/cast.json
+python/casts.json
 runtime/
 
 # Media. The bundled CC0 sample is committed; everything else you play is
