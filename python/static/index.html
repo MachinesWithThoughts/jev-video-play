@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jev video play</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<div class="buildbar"><span id="build-info" title="">—</span></div>
+
+<header class="bar">
+  <div class="brand">
+    <span class="dot-live" id="busy" title="idle"></span>
+    <h1>Jev video play</h1>
+  </div>
+  <div class="meta">
+    <span id="video-name">no video</span>
+    <span class="sep">·</span>
+    <span id="model-name">—</span>
+    <span class="sep">·</span>
+    <span id="cast-info">cast: —</span>
+  </div>
+  <div class="bar-actions">
+    <label class="btn" for="file">Open file…</label>
+    <input id="file" type="file"
+           accept="video/*,.mkv,.avi,.mov,.m4v,.webm,.ts,.m2ts,.mts,.mpg,.mpeg,.wmv,.flv,.ogv,.3gp"
+           hidden>
+  </div>
+</header>
+
+<section class="controls">
+  <label class="switch">
+    <input type="checkbox" id="detect-on" checked>
+    <span>Detect while playing</span>
+  </label>
+
+  <button class="btn" id="detect-once">Detect this frame</button>
+
+  <span class="snap">
+    <input type="text" id="snap-note" placeholder="what looks wrong?" maxlength="300">
+    <button class="btn" id="snap-save">Snapshot case</button>
+  </span>
+
+  <div class="field">
+    <label for="interval">Min gap <output id="interval-out">250 ms</output></label>
+    <input type="range" id="interval" min="0" max="5000" step="50" value="250">
+  </div>
+
+  <div class="field">
+    <label for="presence">Presence ≥ <output id="presence-out">0.60</output></label>
+    <input type="range" id="presence" min="0" max="1" step="0.01" value="0.60">
+  </div>
+
+  <div class="field">
+    <label for="boxconf">Box conf ≥ <output id="boxconf-out">0.10</output></label>
+    <input type="range" id="boxconf" min="0" max="1" step="0.01" value="0.10">
+  </div>
+
+</section>
+
+<main class="panes">
+  <figure class="pane">
+    <figcaption>
+      <span class="tag">Source</span>
+      <span class="caption-note" id="time-note">—</span>
+    </figcaption>
+    <div class="stage" id="stage-video">
+      <video id="video" controls playsinline preload="metadata"></video>
+      <p class="empty gate" id="cast-gate" hidden>
+        <b id="gate-text">Loading cast…</b>
+        <span class="hint">Detection uses the previous show's characters until this lands.</span>
+        <button class="btn" id="gate-skip" type="button">Play anyway</button></p>
+      <p class="empty" id="empty-video">Drop a video here, or use <b>Open file…</b><br>
+        <span class="hint">You can also pass one on the command line.</span></p>
+    </div>
+  </figure>
+
+  <figure class="pane">
+    <figcaption>
+      <span class="tag tag-jev">Jev detections</span>
+      <span class="caption-note" id="frame-note">waiting for the first frame</span>
+      <span class="legend" id="legend">
+        <label class="chip" style="--chip: #4cc9f0">
+          <input type="checkbox" id="show-ship" checked><span>Ships</span>
+        </label>
+        <label class="chip" style="--chip: #ffd166">
+          <input type="checkbox" id="show-person" checked><span>People</span>
+        </label>
+        <label class="chip" style="--chip: #51e5a8">
+          <input type="checkbox" id="show-named" checked><span>Named</span>
+        </label>
+        <label class="chip" style="--chip: crimson">
+          <input type="checkbox" id="show-character" checked><span>Per-character</span>
+        </label>
+        <span class="legend-note">dashed = edges approximate</span>
+      </span>
+    </figcaption>
+    <div class="stage" id="stage-canvas">
+      <canvas id="detections"></canvas>
+      <p class="empty" id="empty-canvas">Boxes land here as Jev answers.</p>
+    </div>
+  </figure>
+</main>
+
+<section class="readout">
+  <div class="card">
+    <h2>Counts</h2>
+    <div id="counts" class="counts"><p class="muted">No answer yet.</p></div>
+  </div>
+
+  <div class="card">
+    <h2>Boxes <span class="muted" id="box-summary"></span></h2>
+    <div id="boxes" class="boxes"><p class="muted">No answer yet.</p></div>
+  </div>
+
+  <div class="card">
+    <h2>Calls</h2>
+    <dl class="stats">
+      <dt>Jev latency</dt><dd id="st-latency">—</dd>
+      <dt>Round trip</dt><dd id="st-round">—</dd>
+      <dt>Requests</dt><dd id="st-requests">0</dd>
+      <dt>Questions / call</dt><dd id="st-questions">—</dd>
+      <dt>Input tokens</dt><dd id="st-tokens">0</dd>
+      <dt>Est. cost</dt><dd id="st-cost">$0.000000</dd>
+      <dt>Answered by</dt><dd id="st-model">—</dd>
+    </dl>
+    <p class="err" id="error" hidden></p>
+  </div>
+</section>
+
+<details class="raw events" id="events-panel">
+  <summary>Events <span class="muted" id="events-count"></span></summary>
+  <ol id="event-log" class="event-log"></ol>
+</details>
+
+<details class="raw">
+  <summary>Raw Jev response</summary>
+  <div class="raw-actions">
+    <button class="btn" id="raw-save" type="button">Save JSON</button>
+    <span class="muted" id="raw-saved"></span>
+  </div>
+  <pre id="raw">—</pre>
+</details>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

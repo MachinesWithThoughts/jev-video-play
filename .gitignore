@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Generated / local
+.venv/
+__pycache__/
+.freebuff/
+python/cast.json
+runtime/
+
+# Media. The bundled CC0 sample is committed; everything else you play is
+# yours and stays out of the repo.
+*.mkv
+*.avi
+*.mov
+*.m4v
+*.webm
+*.mp4
+!samples/harbour-helsinki.mp4

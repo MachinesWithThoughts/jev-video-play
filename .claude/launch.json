@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "jev-video-play",
+      "runtimeExecutable": "./python/app.py",
+      "runtimeArgs": ["samples/harbour-helsinki.mp4", "--port", "8111"],
+      "port": 8111
+    },
+    {
+      "name": "jev-video-play-startrek",
+      "runtimeExecutable": "./python/app.py",
+      "runtimeArgs": ["Star Trek - TNG - S02E04 - The Outrageous Okona.mp4", "--port", "8222"],
+      "port": 8222
+    }
+  ]
+}
