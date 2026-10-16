@@ -1041,7 +1041,12 @@ function renderBoxList() {
 // ---------------------------------------------------------------- events
 
 const EVENT_LIMIT = 300;
+// How often to re-pull the JSON endpoint. SSE is the live path, but a buffering
+// proxy (a Cloudflare quick tunnel, say) stalls the stream, so the poll is what
+// keeps the panel filled through those.
+const EVENT_POLL_MS = 3000;
 let eventCount = 0;
+let lastEventSeq = 0;
 
 // Report something the viewer did, so it lands in the same ordered stream as
 // the backend's own events rather than a separate list.
@@ -1053,10 +1058,71 @@ function logEvent(message, detail, level) {
   fetch("/api/events", { method: "POST", body }).catch(() => {});
 }
 
+// Render one event as a row. Every event carries a monotonically increasing
+// `seq`, so both the live stream and the polling path can hand events here and
+// the first to arrive wins; the other copy is dropped.
+function renderEvent(event) {
+  if (!event || typeof event.seq !== "number" || event.seq <= lastEventSeq) return;
+  lastEventSeq = event.seq;
+
+  const log = $("event-log");
+  const row = document.createElement("li");
+  row.className = `${event.kind} ${event.level}`;
+
+  const when = new Date(event.at * 1000).toLocaleTimeString(undefined, { hour12: false });
+  const extra = event.detail
+    ? Object.entries(event.detail)
+        .filter(([, v]) => v !== null && v !== undefined && v !== "")
+        .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`)
+        .join("  ")
+    : "";
+
+  row.innerHTML = `<span class="when"></span><span class="kind"></span>`
+    + `<span class="what"></span>`;
+  row.children[0].textContent = when;
+  row.children[1].textContent = event.kind;
+  row.children[2].textContent = event.message;
+  if (extra) {
+    const note = document.createElement("div");
+    note.className = "extra";
+    note.textContent = extra;
+    row.children[2].append(note);
+  }
+
+  // Stay pinned to the newest unless the reader has scrolled up.
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  log.append(row);
+  while (log.children.length > EVENT_LIMIT) log.firstChild.remove();
+  if (atBottom) log.scrollTop = log.scrollHeight;
+
+  eventCount += 1;
+  $("events-count").textContent = `(${eventCount})`;
+}
+
+// Pull events from the JSON endpoint rather than the SSE stream — the reliable
+// path through a buffering tunnel. `full` clears the log and re-pulls from the
+// start, which is what the Refresh button does and also recovers if the backend
+// restarted and its sequence numbers wound back.
+async function refreshEvents(full) {
+  if (full) {
+    lastEventSeq = 0;
+    eventCount = 0;
+    $("event-log").replaceChildren();
+    $("events-count").textContent = "";
+  }
+  try {
+    const res = await fetch(`/api/events?since=${lastEventSeq}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    for (const event of data.events || []) renderEvent(event);
+  } catch {
+    // A transient failure; the next poll retries.
+  }
+}
+
 // A live tail of what the backend is doing. Cast lookups take tens of seconds
 // and were previously silent apart from a spinner.
 function startEventLog() {
-  const log = $("event-log");
   const source = new EventSource("/api/events/stream");
 
   source.addEventListener("message", (message) => {
@@ -1066,43 +1132,19 @@ function startEventLog() {
     } catch {
       return;
     }
-
-    const row = document.createElement("li");
-    row.className = `${event.kind} ${event.level}`;
-
-    const when = new Date(event.at * 1000).toLocaleTimeString(undefined, { hour12: false });
-    const extra = event.detail
-      ? Object.entries(event.detail)
-          .filter(([, v]) => v !== null && v !== undefined && v !== "")
-          .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`)
-          .join("  ")
-      : "";
-
-    row.innerHTML = `<span class="when"></span><span class="kind"></span>`
-      + `<span class="what"></span>`;
-    row.children[0].textContent = when;
-    row.children[1].textContent = event.kind;
-    row.children[2].textContent = event.message;
-    if (extra) {
-      const note = document.createElement("div");
-      note.className = "extra";
-      note.textContent = extra;
-      row.children[2].append(note);
-    }
-
-    // Stay pinned to the newest unless the reader has scrolled up.
-    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
-    log.append(row);
-    while (log.children.length > EVENT_LIMIT) log.firstChild.remove();
-    if (atBottom) log.scrollTop = log.scrollHeight;
-
-    eventCount += 1;
-    $("events-count").textContent = `(${eventCount})`;
+    renderEvent(event);
   });
 
   source.addEventListener("error", () => {
     // EventSource reconnects on its own; nothing to do.
   });
+
+  $("events-refresh").addEventListener("click", () => refreshEvents(true));
+
+  // Fill immediately, then keep topping up so a stalled stream never leaves
+  // the panel empty.
+  refreshEvents();
+  setInterval(refreshEvents, EVENT_POLL_MS);
 }
 
 // ---------------------------------------------------------------- snapshots

@@ -12,6 +12,10 @@ header identify a running copy; this file explains what changed between them.
   full-resolution frame (`screenshot`, base64) alongside the downscaled `frame`
   Jev was asked about, so a case shows both what the model received and what
   the viewer actually saw.
+- **Events refresh + polling.** The Events panel now has a Refresh button, and
+  it polls `/api/events` on a short interval in addition to the live SSE stream.
+  The poll is the reliable path through a buffering proxy (a Cloudflare quick
+  tunnel, say) that stalls server-sent events, so the panel fills in regardless.
 
 ### Changed
 - **Box labels that overlap drop to the bottom.** When a box label would sit
