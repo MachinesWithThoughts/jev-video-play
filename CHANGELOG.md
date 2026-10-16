@@ -7,6 +7,8 @@ header identify a running copy; this file explains what changed between them.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-16
+
 ### Added
 - **A cast editor.** The cast readout in the header is now a button that opens
   a modal showing the current cast, where you can add, edit or remove
