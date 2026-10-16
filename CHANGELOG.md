@@ -7,6 +7,12 @@ header identify a running copy; this file explains what changed between them.
 
 ## [Unreleased]
 
+### Added
+- **Full screenshots in snapshot cases.** A validation case now stores the
+  full-resolution frame (`screenshot`, base64) alongside the downscaled `frame`
+  Jev was asked about, so a case shows both what the model received and what
+  the viewer actually saw.
+
 ## [0.3.0] — 2026-10-16
 
 ### Added

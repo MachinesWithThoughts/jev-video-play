@@ -442,6 +442,10 @@ jq '.request' runtime/<case>.json | curl -s https://api.typesafe.ai/v1/systemone
   -H 'Content-Type: application/json' --data-binary @-
 ```
 
+The case also stores a full-resolution `screenshot` (base64) of the exact frame,
+beside the downscaled `frame` Jev was asked about, so you can see what the
+viewer actually saw rather than only the smaller copy the model received.
+
 Replaying a captured case returned all 57 answers with the boxes matching the
 recording to 0.01.
 

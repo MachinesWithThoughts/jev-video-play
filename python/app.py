@@ -42,7 +42,7 @@ from urllib.parse import urlparse
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -1033,13 +1033,14 @@ async def hls_file(stream_id: str, filename: str) -> FileResponse:
     return FileResponse(path, media_type=media_type, headers={"cache-control": "no-store"})
 
 
-def write_case(note: str, view: Any, thresholds: Any) -> Path:
+def write_case(note: str, view: Any, thresholds: Any, screenshot: bytes | None = None) -> Path:
     """Write one self-contained debug case: runtime/YYYYMMDD-HHMMSS-video.json.
 
     The frame travels base64 inside the file, and the stored request inlines it
     as a `data_base64` asset, so the `request` object can be POSTed to Jev
     exactly as it stands. One file is enough to reproduce the call; nothing
-    from this app is needed.
+    from this app is needed. When a full-resolution screenshot is supplied it
+    is stored alongside the downscaled frame Jev actually saw.
     """
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1119,6 +1120,15 @@ def write_case(note: str, view: Any, thresholds: Any) -> Path:
         },
     }
 
+    # The full-resolution frame, when the page sent one, kept separate from
+    # `frame` above (which is the downscaled copy Jev was asked about).
+    if screenshot:
+        case["screenshot"] = {
+            "media_type": "image/jpeg",
+            "bytes": len(screenshot),
+            "base64": base64.b64encode(screenshot).decode("ascii"),
+        }
+
     path.write_text(json.dumps(case, indent=2, default=str) + "\n")
     return path
 
@@ -1129,6 +1139,7 @@ async def api_snapshot(
     view: str = Form("[]"),
     thresholds: str = Form("{}"),
     video_name: str = Form(""),
+    screenshot: UploadFile | None = File(None),
 ) -> JSONResponse:
     if not LAST_CALL:
         raise HTTPException(status_code=400, detail="Nothing to snapshot yet. Run a detection first.")
@@ -1156,8 +1167,10 @@ async def api_snapshot(
         except ValueError:
             return fallback
 
+    screenshot_bytes = await screenshot.read() if screenshot else None
     path = await asyncio.to_thread(
         write_case, note.strip(), decode(view, []), decode(thresholds, {}),
+        screenshot_bytes or None,
     )
     emit("snapshot", f"Wrote runtime/{path.name}", note=note.strip() or None)
     return JSONResponse({

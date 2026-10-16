@@ -69,6 +69,11 @@ const state = {
 const grab = document.createElement("canvas");
 const gctx = grab.getContext("2d", { willReadFrequently: false });
 
+// A second canvas at the video's native size, for the full screenshot that a
+// snapshot case carries alongside the downscaled frame sent to Jev.
+const full = document.createElement("canvas");
+const fctx = full.getContext("2d");
+
 // ---------------------------------------------------------------- setup
 
 async function boot() {
@@ -630,7 +635,10 @@ function fitDims(w, h) {
   return [clamp(w * scale), clamp(h * scale)];
 }
 
-function captureFrame() {
+// Captures the frame at Jev's size (sent to Jev) and, in the same instant, a
+// full-resolution screenshot, so a snapshot case carries both. The two draws
+// happen back-to-back so the screenshot is the very frame that was detected.
+function captureFrames() {
   const vw = video.videoWidth;
   const vh = video.videoHeight;
   if (!vw || !vh) return null;
@@ -640,7 +648,14 @@ function captureFrame() {
   grab.height = h;
   gctx.drawImage(video, 0, 0, w, h);
 
-  return new Promise((resolve) => grab.toBlob(resolve, "image/jpeg", 0.85));
+  full.width = vw;
+  full.height = vh;
+  fctx.drawImage(video, 0, 0, vw, vh);
+
+  return {
+    frame: new Promise((resolve) => grab.toBlob(resolve, "image/jpeg", 0.85)),
+    screenshot: new Promise((resolve) => full.toBlob(resolve, "image/jpeg", 0.92)),
+  };
 }
 
 async function sendFrame() {
@@ -649,10 +664,11 @@ async function sendFrame() {
   setBusy(true);
 
   try {
-    const blob = await captureFrame();
-    if (!blob) return;
+    const captures = captureFrames();
+    if (!captures) return;
 
     const stamp = video.currentTime;
+    const [blob, screenshot] = await Promise.all([captures.frame, captures.screenshot]);
     const bitmap = await createImageBitmap(blob);
 
     const body = new FormData();
@@ -678,7 +694,7 @@ async function sendFrame() {
     state.stats.requests += 1;
     state.stats.tokensIn += data.usage?.input_tokens || 0;
     state.stats.tokensOut += data.usage?.output_tokens || 0;
-    state.last = { data, bitmap, stamp, roundTrip };
+    state.last = { data, bitmap, stamp, roundTrip, screenshot };
 
     redraw();
     renderReadout();
@@ -1107,6 +1123,10 @@ async function saveSnapshot() {
     body.append("thresholds", JSON.stringify({
       presence: state.presenceMin, boxConfidence: state.boxMin, nameMin: NAME_MIN, iouMax: IOU_MAX,
     }));
+    // The full-resolution frame, distinct from the downscaled one Jev saw.
+    if (state.last.screenshot) {
+      body.append("screenshot", state.last.screenshot, "screenshot.jpg");
+    }
 
     const response = await fetch("/api/snapshot", { method: "POST", body });
     const data = await response.json();
