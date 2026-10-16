@@ -5,6 +5,12 @@ Notable changes, newest first. Dates are the day the work landed.
 The version in `VERSION` (`python/app.py`) and the build stamp in the page
 header identify a running copy; this file explains what changed between them.
 
+## [Unreleased]
+
+### Changed
+- **Box list is a fixed five rows tall.** The Boxes list no longer grows with
+  every band; it caps at five rows and scrolls past that.
+
 ## [1.4.0] — 2026-10-16
 
 ### Added

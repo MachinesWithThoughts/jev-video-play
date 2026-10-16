@@ -211,7 +211,13 @@ select {
 .count-row .val { font-weight: 600; }
 .count-row .prob { margin-left: auto; color: var(--ink-dim); font-variant-numeric: tabular-nums; font-size: 12px; }
 
-.boxes { display: flex; flex-direction: column; gap: 8px; }
+.boxes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 248px; /* about five rows, then scroll */
+  overflow-y: auto;
+}
 
 .box-row { display: grid; grid-template-columns: 10px 1fr auto; gap: 9px; align-items: center; }
 .box-row.dropped { opacity: .4; }
