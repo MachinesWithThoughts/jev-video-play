@@ -845,15 +845,21 @@ function drawDetections() {
   $("empty-canvas").hidden = true;
 
   dctx.drawImage(bitmap, 0, 0);
+  const placed = [];
   for (const box of paintedBoxes()) {
-    paintBox(dctx, box, detections.width, detections.height);
+    paintBox(dctx, box, detections.width, detections.height, placed);
   }
 
   $("frame-note").textContent =
     `frame at ${fmtTime(last.stamp)} · ${bitmap.width}x${bitmap.height} · ${last.data.latency_ms} ms`;
 }
 
-function paintBox(ctx, item, width, height) {
+// Two label chips overlap when their rectangles share any area.
+function chipsOverlap(a, b) {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+function paintBox(ctx, item, width, height, placed) {
   const edges = item.box;
   const x = edges.left * width;
   const y = edges.top * height;
@@ -886,7 +892,6 @@ function paintBox(ctx, item, width, height) {
   const pad = Math.round(size * 0.35);
   const chipW = ctx.measureText(text).width + pad * 2;
   const th = size + pad * 2;
-  const ty = y - th < 0 ? y : y - th;
 
   // Per-character boxes label at the top right. They routinely overlap the
   // region boxes, and a shared corner put two labels on top of each other.
@@ -894,11 +899,23 @@ function paintBox(ctx, item, width, height) {
     ? Math.max(0, Math.min(x + w + line / 2 - chipW, width - chipW))
     : Math.max(0, Math.min(x - line / 2, width - chipW));
 
+  // Above the box, falling back to inside its top edge when that would clip
+  // the top of the frame.
+  let ty = y - th < 0 ? y : y - th;
+
+  // If the chip would sit on one already drawn, drop it to the bottom of the
+  // box rather than burying the earlier label.
+  if (placed.some((p) => chipsOverlap(p, { x: tx, y: ty, w: chipW, h: th }))) {
+    ty = y + h + th > height ? y + h - th : y + h;
+  }
+
   ctx.fillStyle = color;
   ctx.fillRect(tx, ty, chipW, th);
   ctx.fillStyle = "#0c0f14";
   ctx.textBaseline = "middle";
   ctx.fillText(text, tx + pad, ty + th / 2);
+
+  placed.push({ x: tx, y: ty, w: chipW, h: th });
 }
 
 // ---------------------------------------------------------------- readout

@@ -13,6 +13,11 @@ header identify a running copy; this file explains what changed between them.
   Jev was asked about, so a case shows both what the model received and what
   the viewer actually saw.
 
+### Changed
+- **Box labels that overlap drop to the bottom.** When a box label would sit
+  on top of one already drawn, it is moved to the bottom of its box instead of
+  burying the earlier label.
+
 ## [0.3.0] — 2026-10-16
 
 ### Added
