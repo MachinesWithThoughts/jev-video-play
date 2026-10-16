@@ -183,6 +183,8 @@ rebuild takes tens of seconds and why playback is gated while it runs.
 
 **Events.** An in-memory ring of 400, fanned out over server-sent events. The
 cast builder takes a `log` callable, so its progress becomes events for free.
+Only things that happen occasionally are logged — a successful detection is
+not, since one line per frame drowns out everything worth reading.
 Emission is thread-safe: lookups run off the loop via `asyncio.to_thread`, so
 the fan-out is scheduled back with `call_soon_threadsafe`.
 

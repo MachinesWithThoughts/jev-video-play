@@ -367,9 +367,12 @@ anything that isn't Star Trek.
 
 An expandable **Events** panel at the foot of the page tails what the backend
 is doing, over server-sent events: each step of a cast lookup as it happens,
-every detection with its question count, latency and tokens, transcodes,
-snapshots and failures. Cast lookups take tens of seconds and were otherwise
-just a spinner.
+transcodes, snapshots, and failures including a detection that errors. Cast
+lookups take tens of seconds and were otherwise just a spinner.
+
+Successful detections are deliberately not logged — one line per frame buried
+everything else, and the Calls card already carries latency, tokens and the
+question count.
 
 The last 400 events are kept in memory and the recent 80 are replayed when the
 page connects, so reloading does not lose the history. `GET /api/events`

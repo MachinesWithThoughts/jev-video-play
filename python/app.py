@@ -1018,13 +1018,6 @@ async def detect(
             "taken_at": time.time(),
         })
 
-        usage = data.get("usage") or {}
-        counts = {k: v.get("choice") for k, v in parsed["counts"].items()}
-        emit("detect",
-             f"Frame at {timestamp:.1f}s — {len(questions)} questions, "
-             f"{latency_ms} ms, {usage.get('input_tokens', 0)} tokens",
-             counts=counts, candidates=len(parsed["candidates"]),
-             model=data.get("model"), slots=slots)
 
         return JSONResponse({
             "model": data.get("model"),

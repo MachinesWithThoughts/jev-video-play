@@ -37,6 +37,9 @@ header identify a running copy; this file explains what changed between them.
 - Syntax highlighting for the raw Jev response.
 
 ### Changed
+- **Detections no longer post an event per frame.** One line per frame buried
+  everything else; the Calls card already shows latency, tokens and question
+  count. Failed detections are still reported.
 - **Character identification is always on.** The checkbox, the
   `--no-characters` flag and the request parameter are gone.
 - **Slot counts are no longer in the page**, and both default to 10. Change
