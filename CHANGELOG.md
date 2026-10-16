@@ -7,6 +7,8 @@ header identify a running copy; this file explains what changed between them.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-16
+
 ### Added
 - **Open a video from a URL.** A **Open URL** field in the header plays any
   http(s) URL. The backend proxies the bytes same-origin so the frames the
