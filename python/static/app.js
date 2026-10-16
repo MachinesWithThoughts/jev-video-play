@@ -24,6 +24,10 @@ const CHARACTER_COLOR = "#51e5a8";
 // crimson, so the two ways of finding a character stay visually separate.
 const PER_CHARACTER_COLOR = "crimson";
 
+// A box picked from the list is drawn orange, which belongs to no kind, so it
+// stands out against cyan, yellow, green and crimson alike.
+const PICKED_COLOR = "#ff9f1c";
+
 // Bands overlap, and one big ship can answer two of them. Boxes that cover the
 // same thing collapse into the most confident one.
 const IOU_MAX = 0.5;
@@ -44,6 +48,8 @@ const state = {
   show: { ship: true, person: true, named: true, character: true },
   castLoading: false,
   castSkipped: false,
+  selected: null,
+  selectedFrom: null,
   videoName: "",
   serverSide: false,
   transcoding: false,
@@ -300,6 +306,28 @@ function wireControls() {
 
   $("gate-skip").addEventListener("click", skipGate);
 
+  // Delegated: the rows are rebuilt on every answer.
+  $("boxes").addEventListener("click", (event) => {
+    const row = event.target.closest("[data-uid]");
+    if (!row) return;
+    const uid = row.dataset.uid;
+    const same = uid === state.selected && state.selectedFrom === "list";
+    state.selected = same ? null : uid;
+    state.selectedFrom = same ? null : "list";
+    redraw();
+  });
+
+  detections.addEventListener("click", (event) => {
+    const rect = detections.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    // The canvas is laid out at the frame's aspect ratio, so a fraction of
+    // the element is the same fraction of the image the boxes are given in.
+    selectAt(
+      (event.clientX - rect.left) / rect.width,
+      (event.clientY - rect.top) / rect.height,
+    );
+  });
+
   video.addEventListener("play", () => {
     if (state.castLoading && !state.castSkipped) video.pause();
   });
@@ -460,7 +488,8 @@ function iou(a, b) {
 // own confidence, then overlap against the boxes already kept.
 function evaluate() {
   const scored = (state.last?.data.candidates || []).map(
-    (c) => ({ ...c, kept: false, reason: null }),
+    // uid ties a drawn box to its row in the list; kind+label is unique.
+    (c) => ({ ...c, uid: `${c.kind}:${c.label}`, kept: false, reason: null }),
   );
 
   const passed = [];
@@ -490,6 +519,42 @@ function visibleBoxes() {
   return state.view.filter((item) => item.kept && shown(item));
 }
 
+// What gets painted: everything that passed, plus whatever is selected. A
+// gated-out box is still worth seeing when you ask for it by name — clicking
+// its row and getting nothing is indistinguishable from a broken row.
+function paintedBoxes() {
+  const painted = visibleBoxes();
+  if (!state.selected) return painted;
+  if (painted.some((item) => item.uid === state.selected)) return painted;
+
+  const chosen = state.view.find((item) => item.uid === state.selected);
+  return chosen ? [...painted, chosen] : painted;
+}
+
+function boxArea(box) {
+  return Math.max(0, box.right - box.left) * Math.max(0, box.bottom - box.top);
+}
+
+// Pick the box under the point, smallest first: boxes nest, and the small one
+// is the specific answer. Clicking past them all clears the selection.
+function selectAt(x, y) {
+  const hits = paintedBoxes().filter(
+    (item) => x >= item.box.left && x <= item.box.right
+      && y >= item.box.top && y <= item.box.bottom,
+  );
+  hits.sort((a, b) => boxArea(a.box) - boxArea(b.box));
+
+  const picked = hits[0]?.uid ?? null;
+  state.selected = picked === state.selected ? null : picked;
+  state.selectedFrom = state.selected ? "canvas" : null;
+  redraw();
+
+  if (state.selected) {
+    const row = $("boxes").querySelector(`[data-uid="${CSS.escape(state.selected)}"]`);
+    if (row) row.scrollIntoView({ block: "nearest" });
+  }
+}
+
 function redraw() {
   state.view = evaluate();
   drawDetections();
@@ -509,7 +574,7 @@ function drawDetections() {
   $("empty-canvas").hidden = true;
 
   dctx.drawImage(bitmap, 0, 0);
-  for (const box of visibleBoxes()) {
+  for (const box of paintedBoxes()) {
     paintBox(dctx, box, detections.width, detections.height);
   }
 
@@ -523,17 +588,28 @@ function paintBox(ctx, item, width, height) {
   const y = edges.top * height;
   const w = (edges.right - edges.left) * width;
   const h = (edges.bottom - edges.top) * height;
-  const color = boxColor(item);
+  let color = boxColor(item);
   const line = Math.max(2, Math.round(width / 480));
   const unsure = item.confidence < SURE;
 
-  ctx.lineWidth = line;
+  const picked = item.uid === state.selected;
+  const fromList = picked && state.selectedFrom === "list";
+  if (fromList) color = PICKED_COLOR;
+
+  ctx.lineWidth = picked ? line * 2.5 : line;
   ctx.strokeStyle = color;
-  ctx.setLineDash(unsure ? [line * 3, line * 2] : []);
+  ctx.setLineDash(unsure && !picked ? [line * 3, line * 2] : []);
+  if (picked) {
+    ctx.shadowColor = color;
+    ctx.shadowBlur = line * 6;
+  }
   ctx.strokeRect(x, y, w, h);
+  ctx.shadowBlur = 0;
   ctx.setLineDash([]);
 
-  const text = `${boxLabel(item)}${unsure ? " ~" : ""}`;
+  const text = picked && !item.kept
+    ? `${boxLabel(item)} — ${item.reason}`
+    : `${boxLabel(item)}${unsure ? " ~" : ""}`;
   const size = Math.max(12, Math.round(width / 56));
   ctx.font = `600 ${size}px -apple-system, system-ui, sans-serif`;
   const pad = Math.round(size * 0.35);
@@ -652,6 +728,11 @@ function renderBoxList() {
   for (const item of candidates) {
     const row = document.createElement("div");
     row.className = item.kept ? "box-row" : "box-row dropped";
+    row.dataset.uid = item.uid;
+    if (item.uid === state.selected) {
+      row.classList.add("selected");
+      if (state.selectedFrom === "list") row.classList.add("from-list");
+    }
     row.innerHTML = `
       <span class="swatch" style="background:${boxColor(item)}"></span>
       <span>

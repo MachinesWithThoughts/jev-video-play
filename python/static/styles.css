@@ -140,6 +140,7 @@ select {
   display: block;
 }
 .stage canvas { pointer-events: none; }
+#detections { pointer-events: auto; cursor: crosshair; }
 
 .empty {
   position: absolute;
@@ -402,3 +403,17 @@ select {
   margin: 10px 0 2px;
 }
 .raw-actions .muted { font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
+
+.box-row.selected {
+  background: rgba(229, 81, 186, .12);
+  box-shadow: inset 2px 0 0 var(--accent);
+  border-radius: 3px;
+}
+.box-row.selected .name { color: var(--ink); }
+
+.box-row { cursor: pointer; }
+.box-row.selected.from-list {
+  background: rgba(255, 159, 28, .14);
+  box-shadow: inset 2px 0 0 #ff9f1c;
+}
+.box-row.selected.from-list .name { color: #ff9f1c; }

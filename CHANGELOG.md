@@ -8,6 +8,11 @@ header identify a running copy; this file explains what changed between them.
 ## [Unreleased]
 
 ### Added
+- **The Boxes list and the detections panel are linked both ways.** Clicking
+  a box highlights and scrolls to its row, drawn heavier in its own colour;
+  clicking a row turns that row and its box orange. A selected box is drawn
+  even when it was gated out, labelled with why. Overlapping boxes resolve to
+  the smallest under the pointer.
 - **Events panel.** An expandable live tail of backend telemetry over
   server-sent events: each step of a cast lookup, every detection with its
   question count, latency and tokens, transcodes, snapshots and failures. The

@@ -120,6 +120,17 @@ presence, with colour breaking ties.
 The colour chips are visibility only. They filter the drawing and the list;
 they never change what is asked.
 
+Each candidate carries a `uid` of `kind:label`, which ties a drawn box to its
+row. Clicking the canvas converts the point to a fraction of the element —
+the canvas is laid out at the frame's aspect ratio, so that is the same
+fraction of the image the boxes are expressed in — and selects the smallest
+box containing it. The list is clickable the same way, by delegation since
+the rows are rebuilt on every answer. The selection records which side it
+came from: picked from the list, the box is redrawn orange, a colour no kind
+uses. The painted set is the kept boxes **plus whatever is selected**, so a
+gated-out candidate can still be inspected on the frame, labelled with the
+reason it was dropped.
+
 ## The cast lookup
 
 `cast.py` is both a CLI and a module the backend imports. It writes

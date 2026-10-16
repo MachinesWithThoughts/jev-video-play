@@ -461,6 +461,23 @@ The Boxes list is ordered by what is on screen: drawn boxes first, then by
 presence, with colour breaking ties so crimson still reads before green before
 yellow.
 
+The list and the panel are linked in both directions:
+
+- **Click a box** on the detections panel to highlight its row and scroll to
+  it. The box thickens and gains a halo but keeps its colour. Where boxes
+  overlap the smallest under the pointer wins, since that is the specific
+  answer.
+- **Click a row** to find its box: the row and the box both turn **orange**,
+  which belongs to no kind and so reads against cyan, yellow, green and
+  crimson alike.
+
+Clicking the same thing again, or clicking past every box, clears it.
+
+**A selected box is drawn even when it was gated out**, with the reason on
+its label — `Gomez 13% — gated out`. Clicking a greyed row and seeing nothing
+is indistinguishable from a broken row, and where a rejected box landed is
+often the thing you want to know.
+
 - **Colour chips** (above the detections panel) — show or hide each kind of
   box: cyan ships, yellow unnamed people, green named characters, crimson
   per-character. Visibility only; they filter the drawing and the list without
